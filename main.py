@@ -1,88 +1,92 @@
-import numpy as np
 import argparse
 import cv2
 
-# Structuring the argument parse for the model
-parser = argparse.ArgumentParser(
-    description="Script to run MobileNet-SSD object detection network"
-)
-parser.add_argument("--video", help="path to video file. If empty, camera's stream will be used")
-parser.add_argument("--prototxt", default="MobileNetSSD_deploy.prototxt",
-                    help="Path to test network file: "
-                    "MobileNetSSD_deploy.prototxt for Caffe model or "
-                    )
-parser.add_argument("--weights", default="MobileNetSSD_deploy.caffemodel",
-                    help="Path to weights: "
-                    "MobileNetSSD_deploy.caffemodel for Caffe model or ")
-parser.add_argument("--thr", default=0.2, type=float, help="confidence threshold to filter out weak detections")
-args = parser.parse_args()
+# Credit to djmv at https://github.com/djmv/MobilNet_SSD_opencv for
+# instructions on how to use MobileNet for Object Detection
 
-# Labels for the model
-classNames = {15: 'person'}
+# Structuring the parser for the MobileNet model using the argparse library
+arg_parser = argparse.ArgumentParser(description="This is a script that runs the MobileNet Object Detection")
 
-# Opening the video capture
+# Setting the prototxt file for MobileNet
+arg_parser.add_argument("--prototxt", default="MobileNetSSD_deploy.prototxt")
+
+# Setting the Caffe model/weights for MobileNet
+arg_parser.add_argument("--weights", default="MobileNetSSD_deploy.caffemodel")
+
+# Filtering out unnecessary predictions
+arg_parser.add_argument("--thr", default=0.2, type=float)
+args = arg_parser.parse_args()
+
+# Filtering out MobileNet Labels to only include
+# labels that identify a person
+labels = {15: 'person'}
+
+# Opening the camera feed
 cam = cv2.VideoCapture(0)
 
-# Loading the model
-net = cv2.dnn.readNetFromCaffe(args.prototxt, args.weights)
+# Loading the deep neural network with the above parser arguments
+network = cv2.dnn.readNetFromCaffe(args.prototxt, args.weights)
 
 while True:
-    # Capturing frame-by-frame
+    # Capturing video feed frame-by-frame
     ret, img = cam.read()
     img_resized = cv2.resize(img, (300, 300))
 
     # Dimensions for input images
     blob = cv2.dnn.blobFromImage(img_resized, 0.007843, (300, 300), (127.5, 127.5, 127.5), False)
-    # Setting network to input blob
-    net.setInput(blob)
-    # Network Prediction(s)
-    detections = net.forward()
 
-    # Size of the resized frame
-    cols = img_resized.shape[1]
+    # Setting network to input blob
+    network.setInput(blob)
+
+    # Network Prediction(s)
+    predictions = network.forward()
+
+    # Size of the resized frame (should be 300x300 pixels)
+    columns = img_resized.shape[1]
     rows = img_resized.shape[0]
 
-    # Obtaining class/location of detected object(s)
-    for i in range(detections.shape[2]):
-        confidence = detections[0, 0, i, 2]
-        if confidence > args.thr:
-            class_id = int(detections[0, 0, i, 1])
+    # Obtaining the label/location of detected object(s)
+    for i in range(predictions.shape[2]):
+        confidence = predictions[0, 0, i, 2]  # How much does an image match other images in the dataset
+        if confidence > args.thr:  # Filtering the predictions
+            label_id = int(predictions[0, 0, i, 1])  # Labels
 
-            # Object location(s)
-            xLeftBottom = int(detections[0, 0, i, 3] * cols)
-            yLeftBottom = int(detections[0, 0, i, 4] * rows)
-            xRightTop = int(detections[0, 0, i, 5] * cols)
-            yRightTop = int(detections[0, 0, i, 6] * rows)
+            # The object(s) location in each individual frame
+            xLB = int(predictions[0, 0, i, 3] * columns)
+            yLB = int(predictions[0, 0, i, 4] * rows)
+            xRT = int(predictions[0, 0, i, 5] * columns)
+            yRT = int(predictions[0, 0, i, 6] * rows)
 
             # Scale factor to original size of frame
-            heightFactor = img.shape[0]/300.0
-            widthFactor = img.shape[1]/300.0
+            height = img.shape[0]/300.0
+            width = img.shape[1]/300.0
 
-            # Scaling object detection to frame
-            xLeftBottom = int(widthFactor * xLeftBottom)
-            yLeftBottom = int(heightFactor * yLeftBottom)
-            xRightTop = int(widthFactor * xRightTop)
-            yRightTop = int(heightFactor * yRightTop)
+            # Scaling object detection to size of current frame
+            xLB = int(width * xLB)
+            yLB = int(height * yLB)
+            xRT = int(width * xRT)
+            yRT = int(height * yRT)
 
-            # Drawing the location of the object(s)
-            cv2.rectangle(img, (xLeftBottom, yLeftBottom), (xRightTop, yRightTop), (0, 255, 0))
+            # Drawing the location(s) of the detected object(s)
+            cv2.rectangle(img, (xLB, yLB), (xRT, yRT), (0, 255, 0))
 
-            # Drawing the label and confidence (% match)
-            if class_id in classNames:
-                label = classNames[class_id] + ": " + str(confidence)
-                labelSize, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            # Drawing the label and confidence of the prediction(s) (percent match)
+            if label_id in labels:
+                # Narrowing confidence to 5 decimal places, so it isn't a very small number
+                label = labels[label_id] + ": " + str(round(confidence, 5))
+                label_size, base = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
 
-                yLeftBottom = max(yLeftBottom, labelSize[1])
+                yLB = max(yLB, label_size[1])
 
-                # Printing label name and confidence
-                cv2.rectangle(img, (xLeftBottom, yLeftBottom - labelSize[1]),
-                              (xLeftBottom + labelSize[0], yLeftBottom + baseline),
+                # Displaying label/confidence of the detected object
+                cv2.rectangle(img, (xLB, yLB - label_size[1]),
+                              (xLB + label_size[0], yLB + base),
                               (255, 255, 255), cv2.FILLED)
-                cv2.putText(img, label, (xLeftBottom, yLeftBottom),
+                cv2.putText(img, label, (xLB, yLB),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0))
 
-    cv2.imshow("Object Detection", img)
-    if cv2.waitKey(1) >= 0:
+    cv2.imshow("Rescue Robot Demo (Press ESC to Exit)", img)
+    if cv2.waitKey(1) >= 0:  # Press ESC key to close
         break
 
 cam.release()
